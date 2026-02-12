@@ -8,6 +8,34 @@ if (typeof BigUint64Array === "undefined") {
   const BigUint64Array = window.BigUint64Array;
 }
 
+// Browser-compatible Buffer utilities
+const bufferFrom = (input) => {
+  if (typeof input === 'string') {
+    return new TextEncoder().encode(input);
+  } else if (Array.isArray(input)) {
+    return new Uint8Array(input);
+  } else if (input instanceof Uint8Array) {
+    return input;
+  } else {
+    return new Uint8Array(input);
+  }
+};
+
+const bufferConcat = (arrays) => {
+  const totalLength = arrays.reduce((sum, arr) => sum + arr.length, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const arr of arrays) {
+    result.set(arr, offset);
+    offset += arr.length;
+  }
+  return result;
+};
+
+const isBuffer = (obj) => {
+  return obj instanceof Uint8Array || (typeof Buffer !== 'undefined' && obj instanceof Buffer);
+};
+
 const isLittleEndian =
   new Uint8Array(new Uint32Array([0x11223344]).buffer)[0] === 0x44;
 
@@ -161,11 +189,11 @@ class NumpyMap extends Map {
   }
 }
 
-// Reuse Buffer keys to ensure Map key identity
-const KEY_ND = Buffer.from("nd");
-const KEY_TYPE = Buffer.from("type");
-const KEY_SHAPE = Buffer.from("shape");
-const KEY_DATA = Buffer.from("data");
+// Reuse buffer keys to ensure Map key identity
+const KEY_ND = bufferFrom("nd");
+const KEY_TYPE = bufferFrom("type");
+const KEY_SHAPE = bufferFrom("shape");
+const KEY_DATA = bufferFrom("data");
 
 export function packNumpy(v) {
   if (v === null) {
@@ -242,23 +270,23 @@ function manualEncodeNumpyMap(numpyMap, codec) {
   // Write map header
   const len = entries.length;
   if (len <= 15) {
-    buffers.push(Buffer.from([0x80 + len])); // fixmap
+    buffers.push(bufferFrom([0x80 + len])); // fixmap
   } else if (len <= 65535) {
-    buffers.push(Buffer.from([0xde, len >> 8, len & 0xff])); // map16
+    buffers.push(bufferFrom([0xde, len >> 8, len & 0xff])); // map16
   } else {
-    buffers.push(Buffer.from([0xdf, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff])); // map32
+    buffers.push(bufferFrom([0xdf, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff])); // map32
   }
 
   // Write each key-value pair
   for (const [key, value] of entries) {
     // Write key as bin (binary string)
-    const keyBuf = Buffer.isBuffer(key) ? key : Buffer.from(key);
+    const keyBuf = isBuffer(key) ? key : bufferFrom(key);
     if (keyBuf.length <= 255) {
-      buffers.push(Buffer.from([0xc4, keyBuf.length])); // bin8
+      buffers.push(bufferFrom([0xc4, keyBuf.length])); // bin8
     } else if (keyBuf.length <= 65535) {
-      buffers.push(Buffer.from([0xc5, keyBuf.length >> 8, keyBuf.length & 0xff])); // bin16
+      buffers.push(bufferFrom([0xc5, keyBuf.length >> 8, keyBuf.length & 0xff])); // bin16
     } else {
-      buffers.push(Buffer.from([0xc6, (keyBuf.length >> 24) & 0xff, (keyBuf.length >> 16) & 0xff, (keyBuf.length >> 8) & 0xff, keyBuf.length & 0xff])); // bin32
+      buffers.push(bufferFrom([0xc6, (keyBuf.length >> 24) & 0xff, (keyBuf.length >> 16) & 0xff, (keyBuf.length >> 8) & 0xff, keyBuf.length & 0xff])); // bin32
     }
     buffers.push(keyBuf);
 
@@ -267,7 +295,7 @@ function manualEncodeNumpyMap(numpyMap, codec) {
     buffers.push(valueBuf);
   }
 
-  return Buffer.concat(buffers);
+  return bufferConcat(buffers);
 }
 
 // Recursively replace NumpyMaps with manually encoded buffers
@@ -305,15 +333,15 @@ function encodeWithNumpySupport(v, codec) {
 
     // Array header
     if (len <= 15) {
-      buffers.push(Buffer.from([0x90 + len])); // fixarray
+      buffers.push(bufferFrom([0x90 + len])); // fixarray
     } else if (len <= 65535) {
-      buffers.push(Buffer.from([0xdc, len >> 8, len & 0xff])); // array16
+      buffers.push(bufferFrom([0xdc, len >> 8, len & 0xff])); // array16
     } else {
-      buffers.push(Buffer.from([0xdd, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff])); // array32
+      buffers.push(bufferFrom([0xdd, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff])); // array32
     }
 
     buffers.push(...encodedItems);
-    return Buffer.concat(buffers);
+    return bufferConcat(buffers);
   } else if (v && typeof v === "object" && v.constructor === Object) {
     // Encode plain object as map
     const entries = Object.entries(v);
@@ -322,11 +350,11 @@ function encodeWithNumpySupport(v, codec) {
 
     // Map header
     if (len <= 15) {
-      buffers.push(Buffer.from([0x80 + len])); // fixmap
+      buffers.push(bufferFrom([0x80 + len])); // fixmap
     } else if (len <= 65535) {
-      buffers.push(Buffer.from([0xde, len >> 8, len & 0xff])); // map16
+      buffers.push(bufferFrom([0xde, len >> 8, len & 0xff])); // map16
     } else {
-      buffers.push(Buffer.from([0xdf, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff])); // map32
+      buffers.push(bufferFrom([0xdf, (len >> 24) & 0xff, (len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff])); // map32
     }
 
     // Encode each key-value pair
@@ -340,7 +368,7 @@ function encodeWithNumpySupport(v, codec) {
       buffers.push(valueBuf);
     }
 
-    return Buffer.concat(buffers);
+    return bufferConcat(buffers);
   } else {
     // Primitive value - use msgpack
     return msgpack.encode(v, { codec });
