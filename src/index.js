@@ -83,6 +83,23 @@ const npmergedims = (data) => {
   }
 };
 
+// Represents a numpy unicode array (e.g. dtype <U8).
+// Each character is a 32-bit UCS-4 code point, stored as Uint32Array.
+// Shape is derived from dtype (chars per string) and codePoints.length.
+class UnicodeArray {
+  constructor(dtype, codePoints) {
+    this.dtype = dtype;   // e.g. "<U8"
+    this.codePoints = codePoints instanceof Uint32Array
+      ? codePoints
+      : new Uint32Array(codePoints.buffer, codePoints.byteOffset, codePoints.byteLength / 4);
+  }
+
+  get shape() {
+    const charsPerString = parseInt(this.dtype.match(/\d+/)[0]);
+    return [this.codePoints.length / charsPerString];
+  }
+}
+
 export function unpackNumpy(v) {
   if (v === null) {
     return v;
@@ -100,13 +117,18 @@ export function unpackNumpy(v) {
     var s = v["shape"] || v["115,104,97,112,101"];
 
     if (isnd !== undefined && typeof t === "string") {
+      const originalDtype = t;
       d = byteswap(t[0], d);
       t = t.slice(1);
 
+      // Unicode (U*): each character is a 32-bit UCS-4 code point.
+      if (t[0] === "U") {
+        const codePoints = new Uint32Array(d.buffer, d.byteOffset, d.byteLength / 4);
+        return new UnicodeArray(originalDtype, codePoints);
+      }
+
       // documentation is here https://numpy.org/doc/stable/reference/arrays.dtypes.html
       constr = {
-        U8: Uint8Array, // this is a unicode string
-
         b: Int8Array,
         B: Int8Array,
 
@@ -198,6 +220,14 @@ const KEY_DATA = bufferFrom("data");
 export function packNumpy(v) {
   if (v === null) {
     return v;
+  } else if (v instanceof UnicodeArray) {
+    // Re-encode with original dtype and shape for a faithful round-trip
+    const res = new NumpyMap();
+    res.set(KEY_ND, true);
+    res.set(KEY_TYPE, v.dtype);
+    res.set(KEY_SHAPE, v.shape);
+    res.set(KEY_DATA, v.codePoints.buffer.slice(v.codePoints.byteOffset, v.codePoints.byteOffset + v.codePoints.byteLength));
+    return res;
   } else if (Array.isArray(v)) {
     const dims = multidimTypedArrayShape(v);
     if (dims !== false) {
@@ -216,7 +246,7 @@ export function packNumpy(v) {
   } else if (typeof v === "object") {
     if (v.buffer !== undefined) {
       const type = {
-        Uint8Array: "U8",
+        Uint8Array: "u1",  // uint8, 1 byte/element — compatible with shape = Uint8Array.length
 
         Int8Array: "b",
 
